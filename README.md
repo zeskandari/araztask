@@ -1,3 +1,12 @@
+araz scenario:
+
+echo nameserver 178.22.122.100 /ets/resolv.conf
+
+
+
+WordPress set up on a LEMP stack (Linux, Nginx, Postgresql, and PHP) for an centos :
+Install a LEMP stack:
+
 ############ installing nginx ################
 
 yum update -y
@@ -39,6 +48,9 @@ yum --disablerepo="*" --enablerepo="remi-safe" list php[7-9][0-9].x86_64
 sudo yum-config-manager --enable remi-php74
 sudo yum install php  php-mysql  php-fpm  php-pgsql install php-gd -y 
 php --version
+++++Configuring Nginx to work with PHP-FPM
+ vim /etc/php.ini
+ cgi.fix_pathinfo=0
 vim /etc/php-fpm.d/www.conf
 
 …
@@ -52,7 +64,8 @@ listen = /var/run/php-fpm/php-fpm.sock;
 listen.owner = nginx
 listen.group = nginx
 listen.mode = 0660
-
+listen.owner = nginx
+listen.group = nginx
 :x!
 sudo systemctl start php-fpm
 systemctl enable php-fpm.service
@@ -61,9 +74,10 @@ sudo systemctl restart php-fpm
 Configuring Nginx to Process PHP Pages:
 vim /etc/nginx/conf.d/default.conf
 server {
-    listen       80;
-    server_name  185.213.167.128;
+    listen	 80;
+    server_name  your_server_ip;
 
+    # note that these lines are originally from the "location /" block
     root   /usr/share/nginx/html;
     index index.php index.html index.htm;
 
@@ -72,7 +86,6 @@ server {
     }
     error_page 404 /404.html;
     error_page 500 502 503 504 /50x.html;
-    
     location = /50x.html {
         root /usr/share/nginx/html;
     }
@@ -87,13 +100,15 @@ server {
 }
 :x!
 systemctl restart nginx
+
 Testing PHP Processing on your Web Server:
 
 sudo chown -R nginx.nginx /usr/share/nginx/html/
 vim /usr/share/nginx/html/info.php
 <?php phpinfo(); ?>
 :x!
-http://http://185.213.167.128//info.php
+http://http://185.213.167.128/info.php
+https://yallalabs.com/linux/how-to-install-lemp-server-nginx-mariadb-php-on-centos-7/
 
 ############ Install WordPress on Nginx ############
 yum install wget -y
@@ -171,8 +186,22 @@ sudo systemctl enable postgresql-13
 sudo systemctl start postgresql-13
 
 #for check
-systemctl status postgresql-10
- 
+systemctl status postgresql-13
+
+
+
+#######install wordpress###############
+cd /etc/nginx/
+wget https://wordpress.org/latest.tar.gz
+tar xzf latest.tar.gz
+# There will a folder named wordpress
+
+
+
+
+
+
+
 ###Download and configure the Fork version of WP4PG in your WordPress directory ###
 cd /usr/share/nginx/html
 ls
@@ -221,9 +250,7 @@ sudo systemctl restart nginx
 
 ============================================
 ####nginx load balancer -round robin########
-on server1,2 install nginx
 
-on server3-loadbalancer->sudo yum install epel-release -y
 sudo yum install nginx -y
 sudo firewall-cmd --permanent --zone=public --add-service=http
 sudo firewall-cmd --permanent --zone=public --add-service=https
@@ -232,34 +259,35 @@ sudo systemctl start nginx
 sudo systemctl enable nginx
 nginx -v
 systemctl status nginx
-cd /etc/nginx/conf.d/load-balancer.conf
-# Define whichch servers to include in the load balancing scheme.
-# It's best to use the servers' private IPs for better performance and security.
-# You can find the private IPs at your UpCloud control panel Network section.
-
+vim /etc/nginx/conf.d/load-balancer.conf
 upstream backend {
-      server 192.168.0.106;
-      server 192.168.0.104;
+        server 192.168.1.105;
+       
+    }
+	
+    server {
+        listen      80 default_server;
+        listen      [::]:80 default_server;
+        
 
-   }
+        location / {
+	        proxy_redirect      off;
+	        proxy_set_header    X-Real-IP $remote_addr;
+	        proxy_set_header    X-Forwarded-For $proxy_add_x_forwarded_for;
+	        proxy_set_header    Host $http_host;
+		proxy_pass http://backend;
+	}
+}
 
-   # This server accepts all traffic to port 80 and passes it to the upstream.
-   # Notice that the upstream name and the proxy_pass need to match.
 
-   server {
-      listen 80;
-
-      location / {
-          proxy_pass http://backend;
-      }
-   }
 systemctl restart nginx
 curl localhost
 ==================================================
 ##### install prometheus on loadbalancer server #####
 yum install epel-release -y
 yum install bash-completion-extras -y
-yum install chrony -y 
+
+yum install chrony ntp -y 
 systemctl enable --now chronyd
 systemctl start chronyd
 systemctl status chronyd
@@ -321,15 +349,64 @@ firewall-cmd --reload
 in browser ->192.168.1.105:9090
 
 
-server1->install haexporter
+server1->install haproxy_exporter
+wget https://github.com/prometheus/haproxy_exporter/releases/download/v0.13.0/haproxy_exporter-0.13.0.linux-amd64.tar.gz
+tar -xvf node_exporter-1.1.2.linux-amd64.tar.gz
+haproxy_exporter-0.13.0.linux-amd64/
+haproxy_exporter-0.13.0.linux-amd64/LICENSE
+haproxy_exporter-0.13.0.linux-amd64/NOTICE
+haproxy_exporter-0.13.0.linux-amd64/haproxy_exporter
 
+useradd -Mrs /bin/false haproxyuser
+getend passwd haproxy
+sudo -u haproxyuser echo $PATH
+cp haproxy_exporter-0.13.0.linux-amd64/haproxy_exporter /usr/local/bin
+chown haproxyuser:haproxyuser /usr/local/bin/haproxy_exporter
+haproxy_exporter --help  
+# vim /usr/lib/systemd/system/haproxy_exporter.service
 
+[Unit]
+Description=Haproxy Exporter
+After=network.target
+Wants=network.target
+
+[Service]
+User=haproxyuser
+Group=haproxyuser
+Type=simple
+ExecStart=/usr/local/bin/haproxy_exporter
+
+[Install]
+WantedBy=multi-user.target
+:x!
+
+systemctl daemon-reload
+
+systemctl enable --now haproxy_exporter.service
+
+systemctl status haproxy_exporter.service
+
+ps aux | grep node  or systemctl status haproxy_exporter.service
+=>nodeuser 10082  
+yum install lsof -y 
+systemctl status prometheus.service
+->main pid 10082
+lsof -Panp 10082 -itcp -sTCP:LISTEN 
+firewall-cmd --add-port=9101/tcp --permanent       ->this is node exporter ip 
+firewall-cmd --reload
+firewall-cmd --list-all
+>ports: 9090/tcp 9101/tcp
+خط بالا باید ببنی ای گی رو چیه ک ادد کنی ب فایروال متلا برای اچای پراکسی ای پی فرق داره 
+in browser: 192.168.1.102:9100
+or
+curl localhost:9101/metrics
+==================================================
 --server3-loadbalancer-
 install docker:
 ***install docker on centos7:***
 yum -y update                                                                     
 yum install -y yum-utils
-vim /etc/resolv.conf (nameserver 178.22.122.100 فیلترشگن ست کن )
+vim /etc/resolv.conf (nameserver 178.22.122.100 
 cd /etc/yum.repos.d
 yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
 yum-config-manager --disable docker-ce-edge
@@ -376,4 +453,6 @@ cd ansible/provision/
  touch vars/main.yml
  cd ..
  cd ..
- provision# # araztask
+ provision# 
+ 
+ 
